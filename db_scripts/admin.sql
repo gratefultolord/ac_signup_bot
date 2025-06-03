@@ -1,0 +1,1 @@
+INSERT INTO admins (chat_id) VALUES (166018759), (320522635);
