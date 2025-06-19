@@ -7,6 +7,7 @@ DROP TABLE IF EXISTS admins CASCADE;
 -- Таблица для хранения пользователей
 CREATE TABLE users (
                        id SERIAL PRIMARY KEY,
+                       telegram_user_id BIGINT UNIQUE,
                        first_name VARCHAR(255) NOT NULL,
                        last_name VARCHAR(255) NOT NULL,
                        birth_date DATE NOT NULL,
@@ -39,7 +40,8 @@ CREATE TABLE registration_requests (
 CREATE TABLE tokens (
                         id SERIAL PRIMARY KEY,
                         user_id INT NOT NULL,
-                        token VARCHAR(255) NOT NULL UNIQUE, -- Шестизначный код (в будущем JWT)
+                        token VARCHAR(255) UNIQUE, -- JWT
+                        code VARCHAR(10) NOT NULL, -- шестизначный код
                         phone_number VARCHAR(20) NOT NULL,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
