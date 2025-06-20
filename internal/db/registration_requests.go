@@ -38,7 +38,7 @@ func (r *RegistrationRequestRepository) Create(req *RegistrationRequest) error {
 	    INSERT INTO registration_requests
 		(telegram_user_id, first_name, last_name, birth_date, user_status,
 		document_path, phone_number, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
 	`,
 		req.TelegramUserID,
 		req.FirstName,
@@ -47,7 +47,6 @@ func (r *RegistrationRequestRepository) Create(req *RegistrationRequest) error {
 		req.UserStatus,
 		req.DocumentPath,
 		req.PhoneNumber,
-		req.Status,
 	)
 	if err != nil {
 		return fmt.Errorf("RegistrationRequestRepository.Create: %w", err)

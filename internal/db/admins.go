@@ -49,3 +49,14 @@ func (r *AdminRepository) Create(chatID int64) error {
 
 	return nil
 }
+
+func (r *AdminRepository) CreateMessage(telegramUserID int64, firstName, lastName, message string) error {
+	query := `INSERT INTO admin_messages (telegram_user_id, first_name, last_name, message) VALUES ($1, $2, $3, $4)`
+
+	_, err := r.db.Exec(query, telegramUserID, firstName, lastName, message)
+	if err != nil {
+		return fmt.Errorf("AdminRepository.CreateMessage: %w", err)
+	}
+
+	return nil
+}

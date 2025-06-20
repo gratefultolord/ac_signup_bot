@@ -9,13 +9,12 @@ import (
 )
 
 type Config struct {
-	BotToken      string
-	AdminBotToken string
-	DBUser        string
-	DBPassword    string
-	DBName        string
-	DBHost        string
-	DBPort        string
+	BotToken   string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	DBHost     string
+	DBPort     string
 }
 
 func Load() (*Config, error) {
@@ -25,13 +24,12 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		BotToken:      os.Getenv("BOT_TOKEN"),
-		AdminBotToken: os.Getenv("ADMIN_BOT_TOKEN"),
-		DBUser:        os.Getenv("DB_USER"),
-		DBPassword:    os.Getenv("DB_PASSWORD"),
-		DBName:        os.Getenv("DB_NAME"),
-		DBHost:        os.Getenv("DB_HOST"),
-		DBPort:        os.Getenv("DB_PORT"),
+		BotToken:   os.Getenv("BOT_TOKEN"),
+		DBUser:     os.Getenv("DB_USER"),
+		DBPassword: os.Getenv("DB_PASSWORD"),
+		DBName:     os.Getenv("DB_NAME"),
+		DBHost:     os.Getenv("DB_HOST"),
+		DBPort:     os.Getenv("DB_PORT"),
 	}
 
 	if cfg.BotToken == "" {

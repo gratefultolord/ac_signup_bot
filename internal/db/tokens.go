@@ -38,7 +38,7 @@ func (r *TokenRepository) Create(token *Token) error {
 		token.Token,
 		token.Code,
 		token.PhoneNumber,
-		token.ExpiresAt,
+		time.Hour*24*7,
 	)
 	if err != nil {
 		return fmt.Errorf("TokenRepository.Create: %w", err)
