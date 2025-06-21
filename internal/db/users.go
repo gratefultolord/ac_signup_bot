@@ -21,6 +21,18 @@ type User struct {
 	UpdatedAt      time.Time `db:"updated_at"`
 }
 
+type UserShort struct {
+	TelegramUserID int64     `db:"telegram_user_id"`
+	FirstName      string    `db:"first_name"`
+	LastName       string    `db:"last_name"`
+	BirthDate      time.Time `db:"birth_date"`
+	Status         string    `db:"status"`
+	PhoneNumber    string    `db:"phone_number"`
+	ExpiresAt      time.Time `db:"expires_at"`
+	CreatedAt      time.Time `db:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at"`
+}
+
 type UserRepository struct {
 	db *sqlx.DB
 }
@@ -31,8 +43,8 @@ func NewUsersRepository(db *sqlx.DB) *UserRepository {
 	}
 }
 
-// Добавить нового пользователя (после approve)
-func (r *UserRepository) Create(user *User) error {
+// Добавить нового пользователя (после payment)
+func (r *UserRepository) Create(user *UserShort) error {
 	_, err := r.db.Exec(`
 	    INSERT INTO users
 		(telegram_user_id, first_name, last_name, birth_date, status, phone_number, photo_path, expires_at)

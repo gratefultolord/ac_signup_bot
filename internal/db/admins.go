@@ -13,6 +13,15 @@ type Admin struct {
 	CreatedAt time.Time `db:"created_at"`
 }
 
+type AdminMessage struct {
+	ID             int64     `db:"id"`
+	TelegramUserID int64     `db:"telegram_user_id"`
+	FirstName      string    `db:"first_name"`
+	LastName       string    `db:"last_name"`
+	Message        string    `db:"message"`
+	CreatedAt      time.Time `db:"created_at"`
+}
+
 type AdminRepository struct {
 	db *sqlx.DB
 }
@@ -59,4 +68,35 @@ func (r *AdminRepository) CreateMessage(telegramUserID int64, firstName, lastNam
 	}
 
 	return nil
+}
+
+func (r *AdminRepository) IsAdmin(telegramUserID int64) (bool, error) {
+	var count int
+	query := `SELECT COUNT(*) FROM admins WHERE chat_id = $1`
+
+	err := r.db.Get(&count, query, telegramUserID)
+	if err != nil {
+		return false, fmt.Errorf("AdminRepository.IsAdmin: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *AdminRepository) GetLatestMessages() ([]AdminMessage, error) {
+	var messages []AdminMessage
+
+	query := `
+	    SELECT
+		    id, telegram_user_id, first_name, last_name, message, created_at
+		FROM admin_messages
+		ORDER BY created_at DESC
+		LIMIT 20	
+	`
+
+	err := r.db.Select(&messages, query)
+	if err != nil {
+		return nil, fmt.Errorf("AdminRepository.GetLatestMessages: %w", err)
+	}
+
+	return messages, nil
 }

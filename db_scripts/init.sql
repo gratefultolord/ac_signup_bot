@@ -44,7 +44,7 @@ CREATE TABLE tokens (
                         code VARCHAR(10) NOT NULL, -- шестизначный код
                         phone_number VARCHAR(20) NOT NULL,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                        expires_at TIMESTAMP WITH TIME ZONE,
                         CONSTRAINT fk_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

@@ -1,9 +1,12 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/AlekSi/pointer"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -21,6 +24,17 @@ type RegistrationRequest struct {
 	RejectionReason *string   `db:"rejection_reason"`
 	CreatedAt       time.Time `db:"created_at"`
 	UpdatedAt       time.Time `db:"updated_at"`
+}
+
+type RegistrationRequestShort struct {
+	ID          int64     `db:"id"`
+	FirstName   string    `db:"first_name"`
+	LastName    string    `db:"last_name"`
+	BirthDate   time.Time `db:"birth_date"`
+	UserStatus  string    `db:"user_status"`
+	PhoneNumber string    `db:"phone_number"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
 }
 
 type RegistrationRequestRepository struct {
@@ -114,4 +128,65 @@ func (r *RegistrationRequestRepository) GetByID(requestID int64) (*RegistrationR
 	}
 
 	return &req, nil
+}
+
+func (r *RegistrationRequestRepository) GetNextPending() (*RegistrationRequest, error) {
+	var req RegistrationRequest
+
+	query := `
+	    SELECT
+		    id, telegram_user_id, first_name, last_name, birth_date, user_status, document_path,
+			phone_number, status, rejection_reason, created_at, updated_at
+		FROM registration_requests
+		WHERE status = 'pending'
+		ORDER BY created_at ASC
+		LIMIT 1	
+	`
+
+	err := r.db.Get(&req, query)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("RegistrationRequestRepository.GetNextPending: %w", err)
+	}
+
+	return &req, nil
+}
+
+func (r *RegistrationRequestRepository) GetTelegramUserIDByRequest(requestID int64) (int64, error) {
+	var telegramUserID int64
+
+	query := `
+	    SELECT telegram_user_id
+		FROM registration_requests
+		WHERE id = $1
+	`
+
+	err := r.db.Get(&telegramUserID, query, requestID)
+	if err != nil {
+		return 0, fmt.Errorf("AdminRepository.GetTelegramUserIDByRequest: %w", err)
+	}
+
+	return telegramUserID, nil
+}
+
+func (r *RegistrationRequestRepository) GetByTelegramID(chatID int64) (*RegistrationRequestShort, error) {
+	var req RegistrationRequestShort
+
+	query := `
+	    SELECT 
+		    id, first_name, last_name, birth_date, user_status, phone_number,
+			created_at, updated_at
+		FROM registration_requests
+		WHERE telegram_user_id = $1	
+	`
+
+	err := r.db.Get(&req, query, chatID)
+	if err != nil {
+		return nil, fmt.Errorf("RegistrationRequestRepository.GetByTelegramID: %w", err)
+	}
+
+	return pointer.To(req), nil
 }

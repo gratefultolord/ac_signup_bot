@@ -8,13 +8,13 @@ import (
 )
 
 type Token struct {
-	ID          int64     `db:"id"`
-	UserID      int64     `db:"user_id"`
-	Token       *string   `db:"token"`
-	Code        string    `db:"code"`
-	PhoneNumber string    `db:"phone_number"`
-	CreatedAt   time.Time `db:"created_at"`
-	ExpiresAt   time.Time `db:"expires_at"`
+	ID          int64      `db:"id"`
+	UserID      int64      `db:"user_id"`
+	Token       *string    `db:"token"`
+	Code        string     `db:"code"`
+	PhoneNumber string     `db:"phone_number"`
+	CreatedAt   time.Time  `db:"created_at"`
+	ExpiresAt   *time.Time `db:"expires_at"`
 }
 
 type TokenRepository struct {
@@ -31,14 +31,13 @@ func NewTokenRepository(db *sqlx.DB) *TokenRepository {
 func (r *TokenRepository) Create(token *Token) error {
 	_, err := r.db.Exec(`
         INSERT INTO tokens
-        (user_id, token, code, phone_number, expires_at)
-        VALUES ($1, $2, $3, $4, $5)
+        (user_id, token, code, phone_number)
+        VALUES ($1, $2, $3, $4)
     `,
 		token.UserID,
 		token.Token,
 		token.Code,
 		token.PhoneNumber,
-		time.Hour*24*7,
 	)
 	if err != nil {
 		return fmt.Errorf("TokenRepository.Create: %w", err)

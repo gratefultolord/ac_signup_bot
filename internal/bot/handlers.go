@@ -2,6 +2,7 @@ package bot
 
 import (
 	"log"
+	"time"
 
 	"github.com/AlekSi/pointer"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -54,7 +55,19 @@ func (b *BotService) Start() {
 
 		// Инициализируем state для нового юзера
 		if _, exists := b.userStates[chatID]; !exists {
-			b.userStates[chatID] = &UserState{Step: "start"}
+			req, err := b.registrationRepo.GetLatestByTelegramUserID(chatID)
+			if err == nil && req != nil {
+				switch req.Status {
+				case "approved":
+					b.userStates[chatID] = &UserState{Step: "awaiting_payment"}
+				case "needs_revision":
+					b.userStates[chatID] = &UserState{Step: "needs_revision", RequestID: req.ID}
+				default:
+					b.userStates[chatID] = &UserState{Step: "start"}
+				}
+			} else {
+				b.userStates[chatID] = &UserState{Step: "start"}
+			}
 		}
 
 		state := b.userStates[chatID]
@@ -362,8 +375,6 @@ func (b *BotService) handleWriteAdminMessage(chatID int64, message *tgbotapi.Mes
 	msg := tgbotapi.NewMessage(chatID, "Сообщение отправлено администратору.")
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(keyboard...)
 	b.botAPI.Send(msg)
-
-	b.userStates[chatID] = &UserState{Step: "start"}
 }
 
 func (b *BotService) handlePayment(chatID int64, text string) {
@@ -377,45 +388,59 @@ func (b *BotService) handlePayment(chatID int64, text string) {
 		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, нажмите 'Оплатить' или 'Отмена'.")
 		b.botAPI.Send(msg)
 		return
-	}
+	} else if text == "Оплатить" {
+		authCode := GenerateAuthCode()
 
-	authCode := GenerateAuthCode()
+		req, err := b.registrationRepo.GetByTelegramID(chatID)
+		if err != nil {
+			log.Printf("Error fetching user for payment: %v", err)
+			msg := tgbotapi.NewMessage(chatID, "Ошибка: пользователь не найден.")
+			b.botAPI.Send(msg)
+			b.userStates[chatID] = &UserState{Step: "start"}
+			return
+		}
 
-	user, err := b.usersRepo.GetByTelegramUserID(chatID)
-	if err != nil {
-		log.Printf("Error fetching user for payment: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "Ошибка: пользователь не найден.")
+		now := time.Now()
+
+		err = b.usersRepo.Create(&db.UserShort{
+			TelegramUserID: chatID,
+			FirstName:      req.FirstName,
+			LastName:       req.LastName,
+			BirthDate:      req.BirthDate,
+			Status:         req.UserStatus,
+			PhoneNumber:    req.PhoneNumber,
+			ExpiresAt:      now.AddDate(0, 1, 0),
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		})
+
+		user, err := b.usersRepo.GetByTelegramUserID(chatID)
+
+		tokenReq := db.Token{
+			UserID:      user.ID,
+			Token:       nil,
+			Code:        authCode,
+			PhoneNumber: user.PhoneNumber,
+		}
+
+		err = b.tokenRepo.Create(pointer.To(tokenReq))
+		if err != nil {
+			log.Printf("Error creating token: %v", err)
+			msg := tgbotapi.NewMessage(chatID, "Ошибка при создании кода. Попробуйте позже.")
+			b.botAPI.Send(msg)
+			return
+		}
+
+		msg := tgbotapi.NewMessage(chatID,
+			"Ваш код аутентификации: "+authCode+"\nПерейдите на сайт для завершения: https://your-site.ru")
+		msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Начать регистрацию"),
+				tgbotapi.NewKeyboardButton("Написать админу"),
+			),
+		)
 		b.botAPI.Send(msg)
-		b.userStates[chatID] = &UserState{Step: "start"}
-		return
 	}
-
-	tokenReq := db.Token{
-		UserID:      user.ID,
-		Token:       nil,
-		Code:        authCode,
-		PhoneNumber: user.PhoneNumber,
-	}
-
-	err = b.tokenRepo.Create(pointer.To(tokenReq))
-	if err != nil {
-		log.Printf("Error creating token: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "Ошибка при создании кода. Попробуйте позже.")
-		b.botAPI.Send(msg)
-		return
-	}
-
-	msg := tgbotapi.NewMessage(chatID,
-		"Ваш код аутентификации: "+authCode+"\nПерейдите на сайт для завершения: https://your-site.ru")
-	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Начать регистрацию"),
-			tgbotapi.NewKeyboardButton("Написать админу"),
-		),
-	)
-	b.botAPI.Send(msg)
-
-	b.userStates[chatID] = &UserState{Step: "start"}
 }
 
 func (b *BotService) hasRegistrationRequest(chatID int64) bool {
