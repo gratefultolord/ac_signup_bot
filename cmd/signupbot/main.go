@@ -26,7 +26,7 @@ func main() {
 
 	err = db.RunMigrations(database.Conn, "db_scripts/init.sql", "db_scripts/admin.sql")
 	if err != nil {
-		log.Fatalf("Error running migrations")
+		log.Fatalf("Error running migrations: %v", err)
 	}
 
 	botAPI, err := tgbotapi.NewBotAPI(cfg.BotToken)

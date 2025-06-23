@@ -70,8 +70,8 @@ CREATE TABLE categories (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     photo_path VARCHAR(255),
-    created_at TIMESTAMP WITH TIMEZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIMEZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE partners (
@@ -85,17 +85,14 @@ CREATE TABLE partners (
     discount_type VARCHAR(20) CHECK (discount_type IN ('fixed', 'percent')),
     discount_percent_size DOUBLE PRECISION,
     discount_fixed_size BIGINT,
-    created_at TIMESTAMP WITH TIMEZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIMEZONE DEFAULT CURRENT_TIMESTAMP
-)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Индексы для оптимизации
 CREATE INDEX idx_registration_requests_status ON registration_requests(status);
 CREATE INDEX idx_tokens_user_id ON tokens(user_id);
 CREATE INDEX idx_admins_chat_id ON admins(chat_id);
-
-ALTER TABLE registration_requests DROP CONSTRAINT registration_requests_status_check;
-ALTER TABLE registration_requests ADD CONSTRAINT registration_requests_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'on_hold'));
 
 ALTER TABLE registration_requests DROP CONSTRAINT registration_requests_status_check;
 ALTER TABLE registration_requests ADD CONSTRAINT registration_requests_status_check CHECK (status IN ('pending', 'approved', 'rejected', 'on_hold', 'needs_revision'));
