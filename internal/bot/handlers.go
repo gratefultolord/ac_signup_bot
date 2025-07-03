@@ -1,7 +1,12 @@
 package bot
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/AlekSi/pointer"
@@ -12,13 +17,14 @@ import (
 )
 
 type BotService struct {
-	botAPI           *tgbotapi.BotAPI
-	registrationRepo *db.RegistrationRequestRepository
-	usersRepo        *db.UserRepository
-	tokenRepo        *db.TokenRepository
-	adminRepo        *db.AdminRepository
-	fileService      *files.FileService
-	userStates       map[int64]*UserState
+	botAPI                *tgbotapi.BotAPI
+	registrationRepo      *db.RegistrationRequestRepository
+	usersRepo             *db.UserRepository
+	tokenRepo             *db.TokenRepository
+	adminRepo             *db.AdminRepository
+	fileService           *files.FileService
+	userStates            map[int64]*UserState
+	telegramProviderToken string
 }
 
 func New(
@@ -28,15 +34,17 @@ func New(
 	tokenRepo *db.TokenRepository,
 	adminRepo *db.AdminRepository,
 	fileService *files.FileService,
+	telegramProviderToken string,
 ) *BotService {
 	return &BotService{
-		botAPI:           botAPI,
-		registrationRepo: registrationRepo,
-		usersRepo:        userRepo,
-		tokenRepo:        tokenRepo,
-		adminRepo:        adminRepo,
-		fileService:      fileService,
-		userStates:       make(map[int64]*UserState),
+		botAPI:                botAPI,
+		registrationRepo:      registrationRepo,
+		usersRepo:             userRepo,
+		tokenRepo:             tokenRepo,
+		adminRepo:             adminRepo,
+		fileService:           fileService,
+		userStates:            make(map[int64]*UserState),
+		telegramProviderToken: telegramProviderToken,
 	}
 }
 
@@ -46,6 +54,21 @@ func (b *BotService) Start() {
 	updates := b.botAPI.GetUpdatesChan(u)
 
 	for update := range updates {
+		if update.PreCheckoutQuery != nil {
+			b.handlePreCheckoutQuery(update.PreCheckoutQuery)
+			continue
+		}
+
+		if update.Message != nil && update.Message.SuccessfulPayment != nil {
+			b.handleSuccessfulPayment(update.Message)
+			continue
+		}
+
+		if update.Message != nil && update.Message.Text == "Подробнее о привилегиях" {
+			b.handlePrivilegesInfo(update.Message.Chat.ID)
+			continue
+		}
+
 		if update.Message == nil {
 			continue
 		}
@@ -107,7 +130,10 @@ func (b *BotService) Start() {
 		case "write_admin":
 			b.handleWriteAdminMessage(chatID, update.Message)
 		case "awaiting_payment":
-			b.handlePayment(chatID, text)
+			b.handlePayment(chatID, text, b.telegramProviderToken)
+		case "waiting_payment_confirmation":
+			msg := tgbotapi.NewMessage(chatID, "Платеж уже инициирован. Пожалуйста, завершите оплату в Telegram")
+			b.botAPI.Send(msg)
 		default:
 			log.Printf("Unknown state %s for chatID %d", state.Step, chatID)
 		}
@@ -117,33 +143,119 @@ func (b *BotService) Start() {
 func (b *BotService) handleStartState(chatID int64) {
 	log.Printf("handleStartState for chatID %d", chatID)
 
-	var keyboard [][]tgbotapi.KeyboardButton
-	keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("Начать регистрацию"),
-	))
-
-	if b.hasRegistrationRequest(chatID) {
-		keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Написать админу"),
-		))
+	keyboard := [][]tgbotapi.KeyboardButton{
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Начать регистрацию"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Подробнее о привилегиях"),
+		),
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+	poem := strings.Join([]string{
+		"Мы родились под сенью великого МГИМО —",
+		"Прекраснейшей из всех земных династий.",
+		"Здесь столько поколений навеки сплетено,",
+		"Дай Бог ему бессмертия и счастья.",
+		"                                              (с) гимн МГИМО",
+	}, "\n")
+
+	welcomeText := poem + "\n\n" +
+		"В переводе с английского <b>Ambassador</b> — это не только дипломатический сотрудник высшего ранга, но и представитель сообщества, адвокат его ценностей.\n\n" +
+		"<b>Ambassador card</b> — премиальная карта, созданная специально для MGIMO-family, приверженцев философии, целей и принципов главной дипломатической альма-матер страны.\n\n" +
+		"Пожалуйста, пройдите короткую регистрацию. Будьте готовы подтвердить свою принадлежность к MGIMO-family.\n\n" +
+		"После успешного прохождения регистрации Вам будут доступны все привилегии сообщества Ambassador card:\n\n" +
+		"♦️ Доступ в закрытый чат резидентов\n" +
+		"♦️ Приложение с лучшими условиями от наших партнёров\n" +
+		"♦️ Информация о мероприятиях сообщества\n\n" +
+		"До скорой встречи!\n\n" +
+		"С наилучшими пожеланиями,\n" +
+		"Команда Ambassador Card"
+
+	msg := tgbotapi.NewMessage(chatID, welcomeText)
+	msg.ParseMode = tgbotapi.ModeHTML
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(keyboard...)
 	b.botAPI.Send(msg)
 }
 
 func (b *BotService) handleStartButton(chatID int64) {
-	msg := tgbotapi.NewMessage(chatID, "Введите ваше имя:")
+	msg := tgbotapi.NewMessage(chatID, "Укажите Ваше имя")
 	msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
 	b.botAPI.Send(msg)
 
 	b.userStates[chatID].Step = "first_name"
 }
 
+func (b *BotService) handlePreCheckoutQuery(query *tgbotapi.PreCheckoutQuery) {
+	confirm := tgbotapi.PreCheckoutConfig{
+		PreCheckoutQueryID: query.ID,
+		OK:                 true,
+	}
+
+	if _, err := b.botAPI.Request(confirm); err != nil {
+		log.Printf("failed to confirm PrecheckoutQuery: %v", err)
+	}
+}
+
+func (b *BotService) handlePrivilegesInfo(chatId int64) {
+	log.Printf("sending privileges (media group) пользователю %d", chatId)
+
+	files, err := os.ReadDir("privileges")
+	if err != nil {
+		log.Printf("failed to read /privileges: %v", err)
+		msg := tgbotapi.NewMessage(chatId, "Не удалось загрузить привилегии. Попробуйте позже")
+		b.botAPI.Send(msg)
+		return
+	}
+
+	var media []interface{}
+	count := 0
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		if !strings.HasSuffix(file.Name(), ".jpg") &&
+			!strings.HasSuffix(file.Name(), ".png") &&
+			!strings.HasSuffix(file.Name(), ".jpeg") {
+			continue
+		}
+
+		if count >= 10 {
+			break
+		}
+
+		photo := tgbotapi.NewInputMediaPhoto(tgbotapi.FilePath(filepath.Join("privileges", file.Name())))
+		if count == 0 {
+			photo.Caption = "Вот привилегии Ambassador card:"
+		}
+
+		media = append(media, photo)
+		count++
+	}
+
+	if len(media) == 0 {
+		msg := tgbotapi.NewMessage(chatId, "Пока нет доступных изображений")
+		b.botAPI.Send(msg)
+		return
+	}
+
+	mediaGroup := tgbotapi.MediaGroupConfig{
+		ChatID: chatId,
+		Media:  media,
+	}
+
+	if _, err := b.botAPI.SendMediaGroup(mediaGroup); err != nil {
+		log.Printf("failed to send media group: %v", err)
+		msg := tgbotapi.NewMessage(chatId, "Ошибка при отправке изображений. Попробуйте позже")
+		b.botAPI.Send(msg)
+	}
+}
+
 func (b *BotService) handleFirstName(chatID int64, firstName string) {
 	if firstName == "" {
-		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введите ваше имя:")
+		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, укажите Ваше имя")
 		b.botAPI.Send(msg)
 
 		return
@@ -152,13 +264,13 @@ func (b *BotService) handleFirstName(chatID int64, firstName string) {
 	b.userStates[chatID].FirstName = firstName
 	b.userStates[chatID].Step = "last_name"
 
-	msg := tgbotapi.NewMessage(chatID, "Введите вашу фамилию:")
+	msg := tgbotapi.NewMessage(chatID, "Укажите Вашу фамилию")
 	b.botAPI.Send(msg)
 }
 
 func (b *BotService) handleLastName(chatID int64, lastName string) {
 	if lastName == "" {
-		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введите вашу фамилию:")
+		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, укажите Вашу фамилию")
 		b.botAPI.Send(msg)
 		return
 	}
@@ -166,7 +278,7 @@ func (b *BotService) handleLastName(chatID int64, lastName string) {
 	b.userStates[chatID].LastName = lastName
 	b.userStates[chatID].Step = "birth_date"
 
-	msg := tgbotapi.NewMessage(chatID, "Введите дату рождения в формате ДД.ММ.ГГГГ (например, 01.01.2000)")
+	msg := tgbotapi.NewMessage(chatID, "Укажите дату рождения в формате ДД.ММ.ГГГГ (например, 01.01.2000)")
 	b.botAPI.Send(msg)
 }
 
@@ -181,7 +293,7 @@ func (b *BotService) handleBirthDate(chatID int64, date string) {
 	b.userStates[chatID].BirthDate = parsedDate
 	b.userStates[chatID].Step = "user_status"
 
-	msg := tgbotapi.NewMessage(chatID, "Выберите ваш статус:")
+	msg := tgbotapi.NewMessage(chatID, "Выберите ваш статус в MGIMO-family")
 	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton("Студент"),
@@ -217,32 +329,36 @@ func (b *BotService) handleUserStatus(chatID int64, status string) {
 	}
 
 	msg := tgbotapi.NewMessage(chatID,
-		"Пожалуйста, загрузите фото или скан\n"+docType[status]+"\nили другого документа, удостоверяющего принадлежность к МГИМО.")
+		"Пожалуйста, загрузите фото или скан\n"+docType[status]+"\nили любого другого документа, удостоверяющего вашу принадлежность к альма-матер")
 	b.botAPI.Send(msg)
 }
 
 func (b *BotService) handlePhoneNumber(chatID int64, text string) {
-	if !IsValidPhoneNumber(text) {
+	normalized := NormalizePhoneNumber(text)
+
+	if !IsValidPhoneNumber(normalized) {
 		msg := tgbotapi.NewMessage(chatID, "Неверный формат номера телефона. Пример: +79991234567")
 		b.botAPI.Send(msg)
 		return
 	}
 
-	b.userStates[chatID].PhoneNumber = text
+	b.userStates[chatID].PhoneNumber = normalized
 	b.userStates[chatID].Step = "agreement"
+	b.userStates[chatID].WaitingForPrivacyConfirmation = false
 
 	msg := tgbotapi.NewMessage(chatID, "Ознакомьтесь с согласием на обработку персональных данных")
 	b.botAPI.Send(msg)
 
 	// Заглушка — файл соглашения (можешь заменить на свой путь)
-	doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath("agreements/personal_agreement.docx"))
-	b.botAPI.Send(doc)
+	agreementDoc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath("agreements/agreement.docx"))
+	b.botAPI.Send(agreementDoc)
 
-	confirmMsg := tgbotapi.NewMessage(chatID, "Подтвердите согласие")
+	agreementMessage := "Я даю согласие на обработку моих персональных данных Ambassador card (ИНН 732610083401) в целях обработки заявки и дальнейшего пользования сервисом.\n"
+	confirmMsg := tgbotapi.NewMessage(chatID, agreementMessage)
 	confirmMsg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Я согласен на обработку персональных данных"),
-			tgbotapi.NewKeyboardButton("Не согласен на обработку персональных данных"),
+			tgbotapi.NewKeyboardButton("Да"),
+			tgbotapi.NewKeyboardButton("Нет"),
 		),
 	)
 	b.botAPI.Send(confirmMsg)
@@ -272,51 +388,92 @@ func (b *BotService) handleDocument(chatID int64, message *tgbotapi.Message) {
 	b.userStates[chatID].DocumentPath = filePath
 	b.userStates[chatID].Step = "phone_number"
 
-	msg := tgbotapi.NewMessage(chatID, "Введите номер телефона (например, +79991234567):")
+	msg := tgbotapi.NewMessage(chatID, "Укажите Ваш номер телефона")
 	b.botAPI.Send(msg)
 }
 
 func (b *BotService) handleAgreement(chatID int64, text string, telegramUserID int64) {
-	if text != "Я согласен на обработку персональных данных" {
-		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, подтвердите согласие, нажав кнопку.")
-		b.botAPI.Send(msg)
-		return
-	}
-
 	state := b.userStates[chatID]
 
-	req := db.RegistrationRequest{
-		TelegramUserID: telegramUserID,
-		FirstName:      state.FirstName,
-		LastName:       state.LastName,
-		BirthDate:      state.BirthDate,
-		UserStatus:     state.UserStatus,
-		DocumentPath:   state.DocumentPath,
-		PhoneNumber:    state.PhoneNumber,
+	if text == "Нет" {
+		msg := tgbotapi.NewMessage(chatID, "Вы можете продолжить регистрацию позже, когда будете готовы дать согласие.")
+		msg.ReplyMarkup = tgbotapi.NewRemoveKeyboard(true)
+		b.botAPI.Send(msg)
+		b.userStates[chatID] = &UserState{Step: "start"}
+		return
 	}
 
-	err := b.registrationRepo.Create(pointer.To(req))
-	if err != nil {
-		log.Printf("Error saving registration request: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "Произошла ошибка при сохранении заявки. Попробуйте снова.")
+	if text == "Да" && !state.WaitingForPrivacyConfirmation {
+		state.WaitingForPrivacyConfirmation = true
+
+		cancelAgreementMessage := "В любой момент Вы можете отозвать своё согласие, написав на почту сard.ambassador@gmail.com"
+		msg := tgbotapi.NewMessage(chatID, cancelAgreementMessage)
+		msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Понятно"),
+			),
+		)
 		b.botAPI.Send(msg)
 		return
 	}
 
-	delete(b.userStates, chatID)
+	if text == "Понятно" && state.WaitingForPrivacyConfirmation {
+		prePolicyMessage := "Пожалуйста, ознакомьтесь с политикой конфиденциальности."
+		preMsg := tgbotapi.NewMessage(chatID, prePolicyMessage)
+		b.botAPI.Send(preMsg)
 
-	var keyboard [][]tgbotapi.KeyboardButton
-	keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("Начать регистрацию"),
-	))
-	if b.hasRegistrationRequest(chatID) {
-		keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButton("Написать админу"),
-		))
+		policyDoc := tgbotapi.NewDocument(
+			chatID, tgbotapi.FilePath("agreements/privacy_policy.docx"))
+		b.botAPI.Send(policyDoc)
+
+		msg := tgbotapi.NewMessage(chatID, "Я подтверждаю, что ознакомлен с политикой конфиденциальности.")
+		msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Да"),
+				tgbotapi.NewKeyboardButton("Нет"),
+			),
+		)
+		b.botAPI.Send(msg)
+
+		return
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Заявка принята. Обработка займёт 24 часа.")
-	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(keyboard...)
+	if text == "Да" && state.WaitingForPrivacyConfirmation {
+		req := db.RegistrationRequest{
+			TelegramUserID: telegramUserID,
+			FirstName:      state.FirstName,
+			LastName:       state.LastName,
+			BirthDate:      state.BirthDate,
+			UserStatus:     state.UserStatus,
+			DocumentPath:   state.DocumentPath,
+			PhoneNumber:    state.PhoneNumber,
+		}
+
+		err := b.registrationRepo.Create(pointer.To(req))
+		if err != nil {
+			log.Printf("failed to create reg request: %v", err)
+			msg := tgbotapi.NewMessage(chatID, "Произошла ошибка при сохранении заявки. Попробуйте позже")
+			b.botAPI.Send(msg)
+			return
+		}
+
+		delete(b.userStates, chatID)
+
+		var keyboard [][]tgbotapi.KeyboardButton
+
+		if b.hasRegistrationRequest(chatID) {
+			keyboard = append(keyboard, tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Написать админу"),
+			))
+		}
+
+		msg := tgbotapi.NewMessage(chatID, "Спасибо! Ваша заявка принята, а ее обработка займёт до 24 часов. После подтверждения заявки вам придет инструкция с дальнейшими действиями.")
+		msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(keyboard...)
+		b.botAPI.Send(msg)
+		return
+	}
+
+	msg := tgbotapi.NewMessage(chatID, "Пожалуйста, выберите один из вариантов на клавиатуре")
 	b.botAPI.Send(msg)
 }
 
@@ -377,7 +534,7 @@ func (b *BotService) handleWriteAdminMessage(chatID int64, message *tgbotapi.Mes
 	b.botAPI.Send(msg)
 }
 
-func (b *BotService) handlePayment(chatID int64, text string) {
+func (b *BotService) handlePayment(chatID int64, text string, telegramProviderToken string) {
 	if text == "Отмена" {
 		b.userStates[chatID] = &UserState{Step: "start"}
 		b.handleStartState(chatID)
@@ -388,59 +545,123 @@ func (b *BotService) handlePayment(chatID int64, text string) {
 		msg := tgbotapi.NewMessage(chatID, "Пожалуйста, нажмите 'Оплатить' или 'Отмена'.")
 		b.botAPI.Send(msg)
 		return
-	} else if text == "Оплатить" {
-		authCode := GenerateAuthCode()
-
-		req, err := b.registrationRepo.GetByTelegramID(chatID)
-		if err != nil {
-			log.Printf("Error fetching user for payment: %v", err)
-			msg := tgbotapi.NewMessage(chatID, "Ошибка: пользователь не найден.")
-			b.botAPI.Send(msg)
-			b.userStates[chatID] = &UserState{Step: "start"}
-			return
-		}
-
-		now := time.Now()
-
-		err = b.usersRepo.Create(&db.UserShort{
-			TelegramUserID: chatID,
-			FirstName:      req.FirstName,
-			LastName:       req.LastName,
-			BirthDate:      req.BirthDate,
-			Status:         req.UserStatus,
-			PhoneNumber:    req.PhoneNumber,
-			ExpiresAt:      now.AddDate(0, 1, 0),
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		})
-
-		user, err := b.usersRepo.GetByTelegramUserID(chatID)
-
-		tokenReq := db.Token{
-			UserID:      user.ID,
-			Token:       nil,
-			Code:        authCode,
-			PhoneNumber: user.PhoneNumber,
-		}
-
-		err = b.tokenRepo.Create(pointer.To(tokenReq))
-		if err != nil {
-			log.Printf("Error creating token: %v", err)
-			msg := tgbotapi.NewMessage(chatID, "Ошибка при создании кода. Попробуйте позже.")
-			b.botAPI.Send(msg)
-			return
-		}
-
-		msg := tgbotapi.NewMessage(chatID,
-			"Ваш код аутентификации: "+authCode+"\nПерейдите на сайт для завершения: https://your-site.ru")
-		msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-			tgbotapi.NewKeyboardButtonRow(
-				tgbotapi.NewKeyboardButton("Начать регистрацию"),
-				tgbotapi.NewKeyboardButton("Написать админу"),
-			),
-		)
-		b.botAPI.Send(msg)
 	}
+
+	title := "Регистрация AC"
+	description := "Регистрация в программе Ambassador Card"
+	payload := "ac_signup_payload_" + strconv.FormatInt(chatID, 10)
+	currency := "RUB"
+	price := tgbotapi.LabeledPrice{
+		Label:  "Регистрация",
+		Amount: 250000,
+	}
+
+	invoice := tgbotapi.NewInvoice(
+		chatID,
+		title,
+		description,
+		payload,
+		telegramProviderToken,
+		"",
+		currency,
+		[]tgbotapi.LabeledPrice{price},
+	)
+	invoice.NeedName = false
+	invoice.NeedEmail = false
+	invoice.NeedPhoneNumber = false
+	invoice.NeedShippingAddress = false
+	invoice.IsFlexible = false
+
+	if _, err := b.botAPI.Send(invoice); err != nil {
+		log.Printf("failed to send invoice: %v", err)
+		msg := tgbotapi.NewMessage(chatID, "Не удалось отправить счет. Попробуйте позже")
+		b.botAPI.Send(msg)
+		return
+	}
+
+	b.userStates[chatID].Step = "waiting_payment_confirmation"
+}
+
+func (b *BotService) handleSuccessfulPayment(message *tgbotapi.Message) {
+	chatId := message.Chat.ID
+	payment := message.SuccessfulPayment
+	providerChargeId := payment.ProviderPaymentChargeID
+
+	log.Printf("Успешный платеж от %d, charge_id: %s", chatId, providerChargeId)
+
+	authCode := GenerateAuthCode()
+
+	req, err := b.registrationRepo.GetByTelegramID(chatId)
+	if err != nil {
+		log.Printf("failed to get registration request: %v", err)
+		return
+	}
+
+	now := time.Now()
+
+	err = b.usersRepo.Create(&db.UserShort{
+		TelegramUserID: chatId,
+		FirstName:      req.FirstName,
+		LastName:       req.LastName,
+		BirthDate:      req.BirthDate,
+		Status:         req.UserStatus,
+		PhoneNumber:    req.PhoneNumber,
+		ExpiresAt:      now.AddDate(0, 1, 0),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	})
+	if err != nil {
+		log.Printf("failed to create user: %v", err)
+		return
+	}
+
+	user, err := b.usersRepo.GetByTelegramUserID(chatId)
+	if err != nil {
+		log.Printf("failed to get user by telegram id: %v", err)
+	}
+
+	tokenReq := db.Token{
+		UserID:      user.ID,
+		Token:       nil,
+		Code:        authCode,
+		PhoneNumber: user.PhoneNumber,
+	}
+
+	err = b.tokenRepo.Create(pointer.To(tokenReq))
+	if err != nil {
+		log.Printf("Error creating token: %v", err)
+		msg := tgbotapi.NewMessage(chatId, "Ошибка при создании кода. Попробуйте позже.")
+		b.botAPI.Send(msg)
+		return
+	}
+
+	poem := strings.Join([]string{
+		"Куда бы нас ни бросило по миру — мы всегда",
+		"В любой стране и на любых маршрутах",
+		"Уверены — нам светит путеводная звезда",
+		"Над сводами родного Института.",
+		"                                              (с) гимн МГИМО",
+	}, "\n")
+
+	poemMessage := tgbotapi.NewMessage(chatId, poem)
+	b.botAPI.Send(poemMessage)
+
+	welcomeText := "<b>Добро пожаловать в закрытое сообщество Ambassador card!</b>\n\n" +
+		"Ссылка на закрытый чат: \n" +
+		"Ссылка на приложение: https://ambassador-card.ru\n\n"
+
+	codeMessage := fmt.Sprintf("(Код доступа в приложение: %s)\n\n", authCode)
+
+	forAddresation := "По всем вопросам вы всегда можете обратиться по почте сard.ambassador@gmail.com."
+
+	msg := tgbotapi.NewMessage(chatId, welcomeText+codeMessage+forAddresation)
+	msg.ParseMode = tgbotapi.ModeHTML
+	msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("Написать админу"),
+		),
+	)
+	b.botAPI.Send(msg)
 }
 
 func (b *BotService) hasRegistrationRequest(chatID int64) bool {

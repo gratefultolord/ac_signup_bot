@@ -15,6 +15,20 @@ func NormalizeText(text string) string {
 	return text
 }
 
+func NormalizePhoneNumber(raw string) string {
+	digitsOnly := regexp.MustCompile(`\D`).ReplaceAllString(raw, "")
+
+	if strings.HasPrefix(digitsOnly, "8") {
+		digitsOnly = "7" + digitsOnly[1:]
+	}
+
+	if strings.HasPrefix(digitsOnly, "7") && len(digitsOnly) == 11 {
+		return digitsOnly
+	}
+
+	return digitsOnly
+}
+
 func IsValidDate(date string) (time.Time, bool) {
 	matched, _ := regexp.MatchString(`\d{2}\.\d{2}\.\d{4}$`, date)
 	if !matched {
@@ -30,7 +44,7 @@ func IsValidDate(date string) (time.Time, bool) {
 }
 
 func IsValidPhoneNumber(phone string) bool {
-	matched, _ := regexp.MatchString(`^\+\d{10,15}$`, phone)
+	matched, _ := regexp.MatchString(`^7\d{10}$`, phone)
 
 	return matched
 }

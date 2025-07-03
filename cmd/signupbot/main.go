@@ -51,6 +51,7 @@ func main() {
 		tokenRepo,
 		adminRepo,
 		fileService,
+		cfg.TelegramProviderToken,
 	)
 
 	log.Printf("Bot started as @%s", botAPI.Self.UserName)

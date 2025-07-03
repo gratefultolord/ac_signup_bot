@@ -206,15 +206,20 @@ func (b *BotService) handleViewRequest(chatID int64, text string, botToken strin
 		if err == nil {
 			userBotApi, _ := tgbotapi.NewBotAPI(botToken)
 
-			msg := tgbotapi.NewMessage(req.TelegramUserID, "Ваша заявка одобрена! Пожалуйста, оплатите подписку")
-			msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+			approveMessage := "Поздравляем! Ваша заявка одобрена. На языке дипломатии теперь Вы – persona grata. После оплаты вам будет предоставлен доступ в закрытый чат, приложение со специальными условиями от наших лучших партнеров, а также информация о мероприятиях сообщества. Пожалуйста, ознакомьтесь с Публичной офертой.\n"
+
+			publicOffert := "*Доступ в сообщество оплачивается на 1 месяц. Подписка не продлевается автоматически и в любой момент ее можно остановить. "
+			msg := tgbotapi.NewMessage(req.TelegramUserID, approveMessage+publicOffert)
+			userBotApi.Send(msg)
+
+			offertDoc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath("agreements/public.docx"))
+			offertDoc.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 				tgbotapi.NewKeyboardButtonRow(
 					tgbotapi.NewKeyboardButton("Оплатить"),
 					tgbotapi.NewKeyboardButton("Написать админу"),
 				),
 			)
-
-			userBotApi.Send(msg)
+			userBotApi.Send(offertDoc)
 		}
 
 		b.handleCheckRequests(chatID)
