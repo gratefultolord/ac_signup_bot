@@ -9,13 +9,14 @@ import (
 )
 
 type Config struct {
-	AdminBotToken string
-	BotToken      string
-	DBUser        string
-	DBPassword    string
-	DBName        string
-	DBHost        string
-	DBPort        string
+	AdminBotToken         string
+	BotToken              string
+	TelegramProviderToken string
+	DBUser                string
+	DBPassword            string
+	DBName                string
+	DBHost                string
+	DBPort                string
 }
 
 func Load() (*Config, error) {
@@ -25,13 +26,14 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AdminBotToken: os.Getenv("ADMIN_BOT_TOKEN"),
-		BotToken:      os.Getenv("BOT_TOKEN"),
-		DBUser:        os.Getenv("DB_USER"),
-		DBPassword:    os.Getenv("DB_PASSWORD"),
-		DBName:        os.Getenv("DB_NAME"),
-		DBHost:        os.Getenv("DB_HOST"),
-		DBPort:        os.Getenv("DB_PORT"),
+		AdminBotToken:         os.Getenv("ADMIN_BOT_TOKEN"),
+		BotToken:              os.Getenv("BOT_TOKEN"),
+		TelegramProviderToken: os.Getenv("TELEGRAM_PROVIDER_TOKEN"),
+		DBUser:                os.Getenv("DB_USER"),
+		DBPassword:            os.Getenv("DB_PASSWORD"),
+		DBName:                os.Getenv("DB_NAME"),
+		DBHost:                os.Getenv("DB_HOST"),
+		DBPort:                os.Getenv("DB_PORT"),
 	}
 
 	if cfg.AdminBotToken == "" {
